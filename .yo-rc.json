@@ -1,0 +1,18 @@
+{
+  "@microsoft/generator-sharepoint": {
+    "plusBeta": false,
+    "isCreatingSolution": true,
+    "nodeVersion": "18.20.8",
+    "sdksVersions": {},
+    "version": "1.21.1",
+    "libraryName": "document-hub",
+    "libraryId": "27660378-36ee-4317-b18e-eb30443875b3",
+    "environment": "spo",
+    "packageManager": "npm",
+    "solutionName": "Document-Hub",
+    "solutionShortDescription": "Document-Hub description",
+    "skipFeatureDeployment": true,
+    "isDomainIsolated": false,
+    "componentType": "webpart"
+  }
+}
