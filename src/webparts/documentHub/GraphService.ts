@@ -22,7 +22,7 @@ export interface IGraphService {
   listConditionalAccessPolicies(): Promise<any[]>;
   listInformationBarriers(): Promise<any[]>;
   uploadFileToDrive(drivePath: string, file: File): Promise<void>;
-  getFolders(driveId: string, folderPath?: string): Promise<any[]>;
+  getFolders(driveId: string, folderId: string, folderPath?: string): Promise<any[]>;
   getSharedWithMe(): Promise<any[]>;
   getDocumentActivities(driveId: string, itemId: string, top?: number): Promise<any[]>;
   getDocumentVersions(driveId: string, itemId: string, top?: number): Promise<any[]>;
@@ -293,18 +293,45 @@ export class GraphService implements IGraphService {
 
   /** Lists folders (only) under a given path in a drive. */
   public async getFolders(driveId: string, folderPath: string = ''): Promise<any[]> {
-    const encodedPath = folderPath
-      ? folderPath.split('/').map(encodeURIComponent).join('/')
-      : '';
-    const pathSegment = encodedPath
-      ? `/root:/${encodedPath}:/children?$filter=folder ne null`
-      : '/root/children?$filter=folder ne null';
-
-    const res = await this.graphClient
-      .api(`/drives/${driveId}${pathSegment}`)
-      .get();
-    return res.value;
+    try {
+      const encodedPath = folderPath
+        ? folderPath.split('/').map(encodeURIComponent).join('/')
+        : '';
+      
+      // Use simpler API endpoint and filter folders client-side
+      const pathSegment = encodedPath
+        ? `/root:/${encodedPath}:/children`
+        : '/root/children';
+ 
+      const res = await this.graphClient
+        .api(`/drives/${driveId}${pathSegment}`)
+        .get();
+      
+      // Filter folders client-side to avoid OData filter issues
+      const items = res.value || [];
+      return items.filter((item: any) => item.folder);
+      
+    } catch (error) {
+      console.warn(`Error fetching folders from path "${folderPath}":`, error);
+      // If specific folder doesn't exist, try to get root folders instead
+      if (folderPath && folderPath !== '') {
+        try {
+          console.log(`Folder "${folderPath}" not found, trying root folders instead`);
+          const res = await this.graphClient
+            .api(`/drives/${driveId}/root/children`)
+            .get();
+          const items = res.value || [];
+          return items.filter((item: any) => item.folder);
+        } catch (rootError) {
+          console.error('Error fetching root folders:', rootError);
+          return [];
+        }
+      }
+      return [];
+    }
   }
+   
+
 
   /** Returns the items shared with the signed‑in user. */
   public async getSharedWithMe(): Promise<any[]> {
