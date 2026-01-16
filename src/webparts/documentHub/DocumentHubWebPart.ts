@@ -335,7 +335,9 @@ export default class DocumenthubWebPart extends BaseClientSideWebPart<IDocumenth
         tile.classList.add(styles.selectedTile);
 
         // --- PATCH: Folder navigation with breadcrumb ---
-        const isFolder = tile.querySelector(`.${styles.documentIcon}`)?.textContent === "📁";
+        
+const isFolder = tile.querySelector(`.${styles.documentIcon}`)?.innerHTML.includes("📁")
+  || tile.getAttribute("data-is-folder") === "true";
         if (isFolder) {
           const itemId = tile.getAttribute('data-id');
           if (!itemId) return;
@@ -1089,44 +1091,45 @@ export default class DocumenthubWebPart extends BaseClientSideWebPart<IDocumenth
     }
   }
 
-  private async renderMyFolders(): Promise<string> {
-    if (!this._graphClient) {
-      return `<p>Unable to load folders.</p>`;
+  
+private async renderMyFolders()
+: Promise<string> {
+  try {
+    // Load root folders from OneDrive, not SharePoint
+    const folders = await this._graphClient!
+      .api("/me/drive/root/children")
+      .filter("folder ne null")
+      .get();
+
+    const items = folders.value || [];
+
+    if (!items.length) {
+      return `<p>No folders found in your OneDrive.</p>`;
     }
-    try {
-      // Fetch the AFRIBIT432 site and drive IDs via service
-      const siteId = await this.getSiteId();
-      const driveId = await this.getDriveId(siteId);
-      // List only folders in the Shared Documents root
-      const items = await this._graphService.getFolders(driveId, 'General');
-      if (!items.length) {
-        return `<p>No folders found.</p>`;
-      }
-      items.sort((a, b) =>
-        new Date(b.lastModifiedDateTime || "").getTime() - new Date(a.lastModifiedDateTime || "").getTime()
-      );
-      return items.map((item: any) => {
-        if (!item || !item.id || !item.name) {
-          return '';
-        }
-        return `
-          <div class="${styles.documentTile}" data-id="${item.id}" data-weburl="${item.webUrl}">
-            <div class="${styles.documentIcon}">📁</div>
-            <div class="${styles.documentTitle}">${item.name}</div>
-            <div class="${styles.documentMeta}">Modified: ${new Date(item.lastModifiedDateTime || "").toLocaleString()}</div>
-            <div class="${styles.documentMeta}">Owner: ${item.lastModifiedBy?.user?.displayName || "Unknown"}</div>
-            <div class="${styles.tileActions}">
-              <button class="${styles.viewButton}">View</button>
-              <button class="${styles.editButton}">Edit</button>
-            </div>
-          </div>
-        `;
-      }).join('');
-    } catch (error) {
-      console.error('Error fetching folders', error);
-      return `<p>Error loading folders.</p>`;
-    }
+
+    
+items.sort((a: any, b: any) => {
+  return new Date(b.lastModifiedDateTime || "").getTime() -
+         new Date(a.lastModifiedDateTime || "").getTime();
+});
+
+    return items.map((f: any) => `
+      <div class="${styles.documentTile}" 
+           data-id="${f.id}" 
+           data-drive-id="me"
+           data-is-folder="true"
+           data-weburl="${f.webUrl}">
+        <div class="${styles.documentIcon}">📁</div>
+        <div class="${styles.documentTitle}">${f.name}</div>
+        <div class="${styles.documentMeta}">Modified: ${new Date(f.lastModifiedDateTime).toLocaleString()}</div>
+      </div>
+    `).join("");
+
+  } catch (err) {
+    console.error("My Folders OneDrive error", err);
+    return `<p>Error loading OneDrive folders.</p>`;
   }
+}
 
   private async renderSharedWithMe(): Promise<string> {
     if (!this._graphClient) {
@@ -1212,8 +1215,10 @@ export default class DocumenthubWebPart extends BaseClientSideWebPart<IDocumenth
 
     try {
       const siteId = await this.getSiteId();
-      const driveId = await this.getDriveId(siteId);
-      const response = await this._graphClient!.api(`/drives/${driveId}/items/${itemId}/children`).get();
+      const driveId = this._driveId || await this.getDriveId(siteId);
+      const response = await this._graphClient!
+  .api(`/me/drive/items/${itemId}/children`)
+  .get();
       const folderItems = response.value as any[];
       // Sort folder items by most recently modified first
       folderItems.sort((a, b) =>
