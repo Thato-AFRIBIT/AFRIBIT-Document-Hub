@@ -20,7 +20,6 @@ export interface IDocumenthubWebPartProps {
 export default class DocumenthubWebPart extends BaseClientSideWebPart<IDocumenthubWebPartProps> {
 
 
-  private _siteId: string | undefined;
   private _driveId: string | undefined;
 
   // Breadcrumb state tracker for folder navigation
@@ -133,8 +132,9 @@ export default class DocumenthubWebPart extends BaseClientSideWebPart<IDocumenth
       .catch(err => {
         console.error('GraphService testGraphCall failed:', err);
       });
-    this._siteId = await this._graphService.getSiteId();
-    this._driveId = await this._graphService.getDriveId(this._siteId);
+
+    const meDrive = await this._graphClient.api("/me/drive").get();
+    this._driveId = meDrive.id;
   }
 
   public render(): void {
@@ -1026,71 +1026,82 @@ const isFolder = tile.querySelector(`.${styles.documentIcon}`)?.innerHTML.includ
   /**
    * Renders “All Documents” using Graph Delta API and paging, with client-side sort/filter.
    */
-  private async renderAllDocuments(): Promise<string> {
+  
+private async renderAllDocuments(): Promise<string> {
+  try {
     if (!this._graphClient) {
       return `<p>Unable to load documents.</p>`;
     }
-    try {
-      const driveId = this._driveId!;
-      // Build delta query or continue via nextLink
-      const pageSize = this._searchRowLimit;
-      const deltaUrl = this._allDocsNextLink
-        ? this._allDocsNextLink
-        : `/drives/${driveId}/root/delta?$top=${pageSize}`;
-      // Fetch page of changes
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const resp: any = await this._graphClient.api(deltaUrl).get();
-      let items = resp.value as any[];
-      // --- Client-side filter ---
-      if (this._filterLast7Days) {
-        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        items = items.filter(i => {
-          const m = i.lastModifiedDateTime ? new Date(i.lastModifiedDateTime).getTime() : 0;
-          return m >= cutoff;
-        });
-      }
-      // --- Client-side sort ---
-      switch (this._sortOption) {
-        case 'modifiedDesc':
-          items.sort((a, b) =>
-            new Date(b.lastModifiedDateTime || "").getTime() - new Date(a.lastModifiedDateTime || "").getTime()
-          );
-          break;
-        case 'modifiedAsc':
-          items.sort((a, b) =>
-            new Date(a.lastModifiedDateTime || "").getTime() - new Date(b.lastModifiedDateTime || "").getTime()
-          );
-          break;
-        case 'nameAsc':
-          items.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-          break;
-        case 'nameDesc':
-          items.sort((a, b) => (b.name || "").localeCompare(a.name || ""));
-          break;
-      }
-      // Update nextLink for subsequent pages
-      this._allDocsNextLink = resp['@odata.nextLink'];
-      if (!items.length) {
-        return `<p>No more documents.</p>`;
-      }
-      // Render items
-      return items.map(item => `
-        <div class="${styles.documentTile}" data-id="${item.id}" data-drive-id="${driveId}" data-weburl="${item.webUrl}">
-          <div class="${styles.documentIcon}">${item.folder ? "📁" : "📄"}</div>
+
+    // ✔ Load ALL items from OneDrive using delta API
+    const deltaUrl = this._allDocsNextLink
+      ? this._allDocsNextLink
+      : `/me/drive/root/delta?$top=${this._searchRowLimit}`;
+
+    const resp: any = await this._graphClient.api(deltaUrl).get();
+    let items = resp.value || [];
+
+    // ⚠️ Filter out “deleted” delta entries
+    items = items.filter((x: any) => !x.deleted);
+
+    // ❗ Apply filters if user has set them
+    if (this._filterLast7Days) {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      items = items.filter((i: any) => {
+        const mod = i.lastModifiedDateTime ? new Date(i.lastModifiedDateTime).getTime() : 0;
+        return mod >= cutoff;
+      });
+    }
+
+    // ❗ Apply sorting
+    switch (this._sortOption) {
+      case "modifiedDesc":
+        items.sort((a: any, b: any) =>
+          new Date(b.lastModifiedDateTime).getTime() -
+          new Date(a.lastModifiedDateTime).getTime()
+        );
+        break;
+      case "modifiedAsc":
+        items.sort((a: any, b: any) =>
+          new Date(a.lastModifiedDateTime).getTime() -
+          new Date(b.lastModifiedDateTime).getTime()
+        );
+        break;
+      case "nameAsc":
+        items.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+        break;
+      case "nameDesc":
+        items.sort((a: any, b: any) => (b.name || "").localeCompare(a.name || ""));
+        break;
+    }
+
+    // Save nextLink for scrolling
+    this._allDocsNextLink = resp["@odata.nextLink"];
+
+    if (!items.length) return `<p>No documents found.</p>`;
+
+    // Render cards
+    return items
+      .filter((i: any) => !i.folder) // folders excluded here
+      .map((item: any) => `
+        <div class="${styles.documentTile}"
+             data-id="${item.id}"
+             data-drive-id="me"
+             data-weburl="${item.webUrl}">
+          <div class="${styles.documentIcon}">📄</div>
           <div class="${styles.documentTitle}">${item.name}</div>
-          <div class="${styles.documentMeta}">Modified: ${item.lastModifiedDateTime ? new Date(item.lastModifiedDateTime).toLocaleString() : ''}</div>
-          <div class="${styles.tileActions}">
-            <button class="${styles.viewButton}">View</button>
-            <button class="${styles.editButton}">Edit</button>
+          <div class="${styles.documentMeta}">
+            Modified: ${new Date(item.lastModifiedDateTime).toLocaleString()}
           </div>
         </div>
-      `).join('');
-    } catch (error) {
-      console.error('Error fetching all documents via Delta API', error);
-      return `<p>Error loading documents.</p>`;
-    }
-  }
+      `)
+      .join("");
 
+  } catch (err) {
+    console.error("AllDocuments OneDrive error", err);
+    return `<p>Error loading documents.</p>`;
+  }
+}
   
 private async renderMyFolders()
 : Promise<string> {
